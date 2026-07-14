@@ -14,8 +14,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "vulnerability-fixer.helloWorld",
-        "title": "Hello World"
+        "command": "vulnerability-fixer.runTool",
+        "title": "Vulnerability Fixer: Run Tool"
       }
     ]
   },
