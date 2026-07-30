@@ -9,6 +9,7 @@
             "node",
             "mocha"
         ],
+        "skipLibCheck": true,
         "sourceMap": true,
         "rootDir": "src",
         "strict": true, /* enable all strict type-checking options */

@@ -35,7 +35,11 @@ async function main() {
 		sourcesContent: false,
 		platform: 'node',
 		outfile: 'dist/extension.js',
-		external: ['vscode'],
+		external: [
+			'vscode',
+			'@github/copilot-sdk',
+			'@github/copilot-*' // this wildcard catches win32-x64, darwin-arm64, etc.
+		],
 		logLevel: 'silent',
 		plugins: [
 			/* add to the end of plugins array */
