@@ -8,8 +8,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void>{
 
 	console.log('Extension "vuln-scanner" is now active!');
 
-	const runTool = vscode.commands.registerCommand('vulnerability-fixer.runTool', () => {
-		openMainPanel(context);
+	const runTool = vscode.commands.registerCommand('vulnerability-fixer.runTool', async () => {
+		await openMainPanel(context);
 	});
 
 	context.subscriptions.push(runTool);

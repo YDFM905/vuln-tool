@@ -1,4 +1,6 @@
 const esbuild = require("esbuild");
+const fs = require("node:fs/promises");
+const path = require("node:path");
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -23,6 +25,38 @@ const esbuildProblemMatcherPlugin = {
 	},
 };
 
+/**
+ * Copies agent markdown definitions from src/agents to dist/agents so the
+ * runtime loader can discover them alongside the bundled extension code.
+ * @type {import('esbuild').Plugin}
+ */
+const copyAgentMarkdownPlugin = {
+	name: 'copy-agent-markdown',
+
+	setup(build) {
+		build.onEnd(async () => {
+			const sourceDir = path.join(__dirname, 'src', 'agents');
+			const targetDir = path.join(__dirname, 'dist', 'agents');
+			try {
+				const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+				await fs.mkdir(targetDir, { recursive: true });
+				await Promise.all(
+					entries
+						.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+						.map((entry) =>
+							fs.copyFile(
+								path.join(sourceDir, entry.name),
+								path.join(targetDir, entry.name),
+							),
+						),
+				);
+			} catch (err) {
+				console.error(`✘ [ERROR] Failed to copy agent markdown files: ${err.message}`);
+			}
+		});
+	},
+};
+
 async function main() {
 	const ctx = await esbuild.context({
 		entryPoints: [
@@ -42,6 +76,7 @@ async function main() {
 		],
 		logLevel: 'silent',
 		plugins: [
+			copyAgentMarkdownPlugin,
 			/* add to the end of plugins array */
 			esbuildProblemMatcherPlugin,
 		],
