@@ -26,12 +26,18 @@ class MainPanel {
 		this.session = await createManagedSession({
 			agents: this.agents,
 		});
-		this.orchestrator = new Orchestrator(this.session, this.agents, this.workspaceRoot, {
-			onPhaseUpdate: (phase) => this.post({ type: 'phase.update', phase }),
-			onEvent: (event) => this.forwardEvent(event),
-			awaitConfirmation: (phaseId, summary) => this.askConfirmation(phaseId, summary),
-			onRunState: (state) => this.forwardRunState(state),
-		});
+		this.orchestrator = new Orchestrator(
+			this.session,
+			this.agents,
+			this.workspaceRoot,
+			{
+				onPhaseUpdate: (phase) => this.post({ type: 'phase.update', phase }),
+				onEvent: (event) => this.forwardEvent(event),
+				awaitConfirmation: (phaseId, summary) => this.askConfirmation(phaseId, summary),
+				onRunState: (state) => this.forwardRunState(state),
+			},
+			path.join(this.context.extensionPath, 'dist', 'agents', 'skills'),
+		);
 
 		this.wireMessages();
 		this.wireDispose();

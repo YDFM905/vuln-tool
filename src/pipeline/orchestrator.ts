@@ -6,6 +6,8 @@ import {
 	runNpmLs,
 	classifyDependencies,
 	readOverrides,
+	readPackageJsonRaw,
+	restorePackageJsonFormat,
 	type DependencyMap,
 	type NpmAuditResult,
 } from '../npm_tools/npmAuditRunner.js';
@@ -44,12 +46,27 @@ interface AuditSummary {
 	remainingNames: string[];
 }
 
+type VulnerabilitySeverity = 'critical' | 'high' | 'moderate' | 'low' | 'info';
+
+const SEVERITY_ORDER: VulnerabilitySeverity[] = ['critical', 'high', 'moderate', 'low', 'info'];
+
+function highestSeverity(values: string[]): VulnerabilitySeverity | undefined {
+	for (const level of SEVERITY_ORDER) {
+		if (values.includes(level)) {
+			return level;
+		}
+	}
+	return undefined;
+}
+
 interface RemainingItem {
 	name: string;
 	currentVersion?: string;
 	isDirect: boolean;
-	vulnerableRange?: string;
+	/** All distinct vulnerable ranges from every CVE affecting this package. A candidate must clear ALL of them. */
+	vulnerableRanges: string[];
 	patchedRange?: string;
+	severity?: VulnerabilitySeverity;
 	parents?: string[];
 }
 
@@ -67,6 +84,7 @@ export class Orchestrator {
 		private readonly agents: Record<string, AgentDefinition>,
 		private readonly workspaceRoot: string,
 		private readonly callbacks: OrchestratorCallbacks,
+		private readonly skillsDir: string,
 	) {}
 
 	async run(input: RunInput): Promise<void> {
@@ -90,10 +108,16 @@ export class Orchestrator {
 			}
 
 			const preRemediationOverrides = await readOverrides(repositoryPath);
+			const preRemediationRaw = await readPackageJsonRaw(repositoryPath);
 			await this.runRemediationPhase(repositoryPath, auditReport, input.signal);
 			if (input.signal?.aborted) {
 				this.callbacks.onRunState('cancelled');
 				return;
+			}
+			this.emitOutput('Restoring package.json formatting...\n');
+			const restoreResult = await restorePackageJsonFormat(repositoryPath, preRemediationRaw);
+			if (!restoreResult.success) {
+				this.emitOutput(`Warning: ${restoreResult.warning}\n`);
 			}
 
 			await this.runFinalReportPhase(repositoryPath, auditReport, preRemediationOverrides, input.signal);
@@ -171,7 +195,7 @@ export class Orchestrator {
 		}
 
 		const currentOverrides = await readOverrides(repositoryPath);
-		const prompt = buildRemediationPrompt(repositoryPath, report, currentOverrides);
+		const prompt = buildRemediationPrompt(repositoryPath, report, currentOverrides, this.skillsDir);
 		this.emitOutput(`Invoking ${agent.name}...\n\n`);
 
 		await this.session.send(prompt, agent.name, {
@@ -186,7 +210,7 @@ export class Orchestrator {
 	private async runFinalReportPhase(
 		repositoryPath: string,
 		auditReport: AuditReport,
-		preRemediationOverrides: Record<string, string>,
+		preRemediationOverrides: Record<string, unknown>,
 		signal?: AbortSignal,
 	): Promise<void> {
 		this.markActive('final-report');
@@ -258,11 +282,21 @@ function buildAuditReport(
 		const isDirect = depMap.directDeps.has(name);
 		const parents = depMap.parentsByPackage[name];
 
-		let vulnerableRange: string | undefined;
+		const vulnerableRanges: string[] = [];
+		const severities: string[] = [];
 		if (Array.isArray(info?.via)) {
-			const first = info.via.find((v: any) => v && typeof v === 'object' && v.range);
-			if (first) {
-				vulnerableRange = String(first.range);
+			for (const v of info.via) {
+				if (v && typeof v === 'object') {
+					if (v.range) {
+						const range = String(v.range);
+						if (!vulnerableRanges.includes(range)) {
+							vulnerableRanges.push(range);
+						}
+					}
+					if (v.severity) {
+						severities.push(String(v.severity));
+					}
+				}
 			}
 		}
 
@@ -275,8 +309,9 @@ function buildAuditReport(
 			name,
 			currentVersion: info?.range ? String(info.range) : undefined,
 			isDirect,
-			vulnerableRange,
+			vulnerableRanges,
 			patchedRange,
+			severity: highestSeverity(severities),
 			parents: parents && parents.length > 0 ? parents : undefined,
 		});
 	}
@@ -297,15 +332,19 @@ function buildAuditReport(
 function buildRemediationPrompt(
 	repositoryPath: string,
 	report: AuditReport,
-	currentOverrides: Record<string, string>,
+	currentOverrides: Record<string, unknown>,
+	skillsDir: string,
 ): string {
 	const lines: string[] = [];
 	lines.push('Repository path:', repositoryPath, '');
+	lines.push('Skills directory:', skillsDir.replace(/\\/g, '/'), '');
 	lines.push('Baseline vulnerability counts:', JSON.stringify(report.baseline.counts), '');
 	lines.push('Post-`npm audit fix` vulnerability counts:', JSON.stringify(report.postFix.counts), '');
 	lines.push('Existing package.json overrides:', JSON.stringify(currentOverrides, null, 2), '');
 	lines.push(
-		'Remaining vulnerable packages (direct/transitive already classified — do NOT re-run `npm audit` or `npm audit fix`):',
+		'Remaining vulnerable packages — each entry contains:',
+		'  name, currentVersion, isDirect, vulnerableRanges (array — candidate MUST clear ALL of them), patchedRange, severity, parents (immediate parents for scoped overrides)',
+		'Do NOT re-run `npm audit` or `npm audit fix`:',
 	);
 	lines.push(JSON.stringify(report.remaining, null, 2));
 	lines.push('');
@@ -313,18 +352,20 @@ function buildRemediationPrompt(
 	return lines.join('\n');
 }
 
-function diffOverrides(before: Record<string, string>, after: Record<string, string>): string[] {
+function diffOverrides(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
 	const entries: string[] = [];
 	const allKeys = new Set<string>([...Object.keys(before), ...Object.keys(after)]);
 	for (const key of Array.from(allKeys).sort()) {
 		const b = before[key];
 		const a = after[key];
-		if (b === undefined && a !== undefined) {
-			entries.push(`+ ${key}: ${a}`);
-		} else if (b !== undefined && a === undefined) {
-			entries.push(`- ${key}: was ${b}`);
-		} else if (b !== a) {
-			entries.push(`~ ${key}: ${b} → ${a}`);
+		const bStr = b !== undefined ? JSON.stringify(b) : undefined;
+		const aStr = a !== undefined ? JSON.stringify(a) : undefined;
+		if (bStr === undefined && aStr !== undefined) {
+			entries.push(`+ ${key}: ${aStr}`);
+		} else if (bStr !== undefined && aStr === undefined) {
+			entries.push(`- ${key}: was ${bStr}`);
+		} else if (bStr !== aStr) {
+			entries.push(`~ ${key}: ${bStr} → ${aStr}`);
 		}
 	}
 	return entries;

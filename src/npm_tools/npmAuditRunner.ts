@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export interface NpmAuditResult {
@@ -140,16 +140,23 @@ export function classifyDependencies(lsRoot: NpmLsRoot): DependencyMap {
     return { directDeps, parentsByPackage };
 }
 
-export async function readOverrides(repositoryPath: string): Promise<Record<string, string>> {
+export async function readOverrides(repositoryPath: string): Promise<Record<string, unknown>> {
     const packageJsonPath = join(repositoryPath, 'package.json');
     try {
         const raw = await readFile(packageJsonPath, 'utf8');
         const parsed = JSON.parse(raw);
         const overrides = parsed?.overrides;
-        if (overrides && typeof overrides === 'object') {
-            const out: Record<string, string> = {};
+        if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
+            const out: Record<string, unknown> = {};
             for (const [key, value] of Object.entries(overrides)) {
                 if (typeof value === 'string') {
+                    out[key] = value;
+                } else if (
+                    value !== null &&
+                    typeof value === 'object' &&
+                    !Array.isArray(value)
+                ) {
+                    // Scoped override — e.g. { "tough-cookie": "4.1.4" }
                     out[key] = value;
                 }
             }
@@ -159,6 +166,77 @@ export async function readOverrides(repositoryPath: string): Promise<Record<stri
         // package.json missing or malformed — treat as no overrides.
     }
     return {};
+}
+
+export async function readPackageJsonRaw(repositoryPath: string): Promise<string> {
+    const packageJsonPath = join(repositoryPath, 'package.json');
+    try {
+        return await readFile(packageJsonPath, 'utf8');
+    } catch {
+        return '';
+    }
+}
+
+export interface RestoreResult {
+    success: boolean;
+    warning?: string;
+}
+
+/**
+ * After the agent writes package.json, re-applies the new `overrides` value
+ * onto the original raw content so that all other formatting (indentation,
+ * key ordering, trailing newline) is preserved.
+ */
+export async function restorePackageJsonFormat(
+    repositoryPath: string,
+    originalRaw: string,
+): Promise<RestoreResult> {
+    if (!originalRaw) {
+        return { success: false, warning: 'Original package.json content was empty; skipping format restore.' };
+    }
+    const packageJsonPath = join(repositoryPath, 'package.json');
+    try {
+        const agentRaw = await readFile(packageJsonPath, 'utf8');
+        const agentParsed = JSON.parse(agentRaw) as Record<string, unknown>;
+        const newOverrides: unknown = agentParsed['overrides'];
+
+        const originalParsed = JSON.parse(originalRaw) as Record<string, unknown>;
+
+        // Detect indent from original: first indented line wins.
+        let indent: string | number = 2;
+        for (const line of originalRaw.split('\n').slice(0, 10)) {
+            if (line.startsWith('\t')) {
+                indent = '\t';
+                break;
+            }
+            const match = line.match(/^( +)/);
+            if (match) {
+                indent = match[1].length;
+                break;
+            }
+        }
+
+        const trailingNewline = originalRaw.endsWith('\n');
+
+        if (newOverrides !== undefined && newOverrides !== null) {
+            originalParsed['overrides'] = newOverrides;
+        } else {
+            delete originalParsed['overrides'];
+        }
+
+        let restored = JSON.stringify(originalParsed, null, indent);
+        if (trailingNewline) {
+            restored += '\n';
+        }
+
+        await writeFile(packageJsonPath, restored, 'utf8');
+        return { success: true };
+    } catch (err) {
+        return {
+            success: false,
+            warning: `package.json format restore failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
 }
 
 function safeParseJson(raw: string): unknown {

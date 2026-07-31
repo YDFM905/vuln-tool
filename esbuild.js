@@ -26,8 +26,8 @@ const esbuildProblemMatcherPlugin = {
 };
 
 /**
- * Copies agent markdown definitions from src/agents to dist/agents so the
- * runtime loader can discover them alongside the bundled extension code.
+ * Recursively copies all .md files under src/agents (including subdirectories
+ * such as skills/) to the mirrored path under dist/agents.
  * @type {import('esbuild').Plugin}
  */
 const copyAgentMarkdownPlugin = {
@@ -35,27 +35,30 @@ const copyAgentMarkdownPlugin = {
 
 	setup(build) {
 		build.onEnd(async () => {
-			const sourceDir = path.join(__dirname, 'src', 'agents');
-			const targetDir = path.join(__dirname, 'dist', 'agents');
+			const sourceRoot = path.join(__dirname, 'src', 'agents');
+			const targetRoot = path.join(__dirname, 'dist', 'agents');
 			try {
-				const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-				await fs.mkdir(targetDir, { recursive: true });
-				await Promise.all(
-					entries
-						.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
-						.map((entry) =>
-							fs.copyFile(
-								path.join(sourceDir, entry.name),
-								path.join(targetDir, entry.name),
-							),
-						),
-				);
+				await copyMdRecursive(sourceRoot, targetRoot);
 			} catch (err) {
 				console.error(`✘ [ERROR] Failed to copy agent markdown files: ${err.message}`);
 			}
 		});
 	},
 };
+
+async function copyMdRecursive(srcDir, destDir) {
+	const entries = await fs.readdir(srcDir, { withFileTypes: true });
+	await fs.mkdir(destDir, { recursive: true });
+	for (const entry of entries) {
+		const srcPath = path.join(srcDir, entry.name);
+		const destPath = path.join(destDir, entry.name);
+		if (entry.isDirectory()) {
+			await copyMdRecursive(srcPath, destPath);
+		} else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+			await fs.copyFile(srcPath, destPath);
+		}
+	}
+}
 
 async function main() {
 	const ctx = await esbuild.context({

@@ -2,7 +2,9 @@
   "name": "vulnerability-fixer",
   "displayName": "Vulnerability Fixer",
   "description": "Automatically makes patch and minor package upgrades in node.js apps ",
-  "version": "0.0.1",
+  "version": "0.1.11",
+  "publisher": "sdlc-assistant",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.125.0"
   },

@@ -29,7 +29,17 @@ export function getWebviewContent(): string {
 
             .top-bar {
                 flex: 0 0 48px;
-                background: #1f6fd1;
+                display: flex;
+                align-items: center;
+                padding: 0 20px;
+                background: var(--vscode-button-background);
+            }
+
+            .top-bar-title {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 600;
+                user-select: none;
             }
 
             .body {
@@ -61,16 +71,16 @@ export function getWebviewContent(): string {
                 width: 100%;
                 min-height: 40px;
                 padding: 10px 12px;
-                border: 1px solid var(--vscode-input-border, rgba(0, 0, 0, 0.18));
+                border: 1px solid rgba(0, 0, 0, 0.18);
                 border-radius: 8px;
-                background: var(--vscode-input-background);
-                color: var(--vscode-input-foreground);
+                background: #f0f0f0;
+                color: #111111;
                 outline: none;
             }
 
             .repo-input:focus {
-                border-color: #1f6fd1;
-                box-shadow: 0 0 0 1px rgba(31, 111, 209, 0.35);
+                border-color: var(--vscode-button-background);
+                box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
             }
 
             .output {
@@ -80,7 +90,7 @@ export function getWebviewContent(): string {
                 border-radius: 12px;
                 border: 1px solid rgba(0, 0, 0, 0.08);
                 background: #ffffff;
-                color: var(--vscode-foreground);
+                color: #111111;
                 white-space: pre-wrap;
                 overflow: auto;
                 box-sizing: border-box;
@@ -127,7 +137,9 @@ export function getWebviewContent(): string {
     </head>
     <body>
         <div class="panel">
-            <div class="top-bar" aria-hidden="true"></div>
+            <div class="top-bar" role="banner">
+                <span class="top-bar-title">Vulnerability Remediator Tool</span>
+            </div>
 
             <main class="body">
                 <section class="input-group" aria-label="Repository path">

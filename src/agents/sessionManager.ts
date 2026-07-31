@@ -79,7 +79,8 @@ export async function createManagedSession(options: CreateManagedSessionOptions)
 			currentSession = undefined;
 		}
 		currentSession = await client.createSession({
-			model: 'auto',
+			// model: 'auto',
+			model: 'claude-sonnet-4.5',
 			streaming: true,
 			onPermissionRequest: copilotsdk.approveAll,
 			customAgents,
